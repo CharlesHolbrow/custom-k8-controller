@@ -1,0 +1,24 @@
+# This yaml file is not currently used. I am pushing the deployment directly
+# using kubectl in deploy.sh
+
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: podcount test depolyment
+  labels:
+    app: aether
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aether
+      role: "map controller"
+  template:
+    metadata:
+      labels:
+        app: aether
+        role: "map controller"
+    spec:
+      containers:
+      - name: gcr.io/udacity-charles-initial/podcount
+        image: gcr.io/udacity-charles-initial/podcount:$1" # How do I script this?
