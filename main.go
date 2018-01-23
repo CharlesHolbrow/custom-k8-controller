@@ -19,9 +19,14 @@ package main
 
 import (
 	"fmt"
+	"hash/fnv"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/deckarep/golang-set"
+	appsv1beta1 "k8s.io/api/apps/v1beta1"
+	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -29,70 +34,123 @@ import (
 )
 
 func main() {
+	fmt.Println("Running ")
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		panic(err.Error())
 	}
+
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		panic(err.Error())
 	}
+
 	for {
+		// Get all the pods that are running a simulation on a map region.
 		pods, err := clientset.CoreV1().Pods("").List(metav1.ListOptions{
-			LabelSelector: "app=aether,type=simulation",
+			LabelSelector: "app=aether,type=map-region",
 		})
 
 		if err != nil {
 			panic(err.Error())
 		}
+
 		fmt.Printf("There are %d pods in the cluster\n", len(pods.Items))
 
-		tileHashes := mapset.NewSet()
+		currentLocations := mapset.NewSet()
 
+		fmt.Println("Found locations...")
 		for i, pod := range pods.Items {
 			name := pod.GetName()
-			kind := pod.Kind
-			labelMap := pod.GetLabels()
-			tileHash := labelMap["location"]
-			tileHashes.Add(tileHash)
+			location := pod.GetLabels()["location"]
+			currentLocations.Add(location)
 
-			fmt.Printf("%d\tName: %s \t Kind: %s\n", i, name, kind)
+			fmt.Printf("%d\tName: %s \t Location: %s \n", i, name, location)
 		}
 
-		wantedHashes := GetWantedHashes()
-		missingHashes := wantedHashes.Difference(tileHashes)
-		extraHashes := tileHashes.Difference(wantedHashes)
+		// Calculate which regions need to be added, and which can be stopped
+		wantedLocations := getWantedLocations()
+		missingLocations := wantedLocations.Difference(currentLocations)
+		extraLocations := currentLocations.Difference(wantedLocations)
 
-		fmt.Println("Missing and Extra Hashes...")
-		for missingHash := range missingHashes.Iter() {
-			fmt.Println("Missing Hashes:", missingHash)
+		fmt.Println("Missing and Extra Locations...")
+		for missingLoc := range missingLocations.Iter() {
+			fmt.Println("Missing location:", missingLoc)
 		}
 
-		for extraHash := range extraHashes.Iter() {
-			fmt.Println("ExtraHash:", extraHash)
+		for extraLoc := range extraLocations.Iter() {
+			fmt.Println("Extra location:", extraLoc)
 		}
-		fmt.Println("...End Missing and Extra Hashes!")
+		fmt.Println("...End Missing and Extra Locations!!!!")
 
-		// Examples for error handling:
-		// - Use helper functions like e.g. errors.IsNotFound()
-		// - And/or cast to StatusError and use its properties like e.g. ErrStatus.Message
-		_, err = clientset.CoreV1().Pods("default").Get("example-xxxxx", metav1.GetOptions{})
-		if errors.IsNotFound(err) {
-			fmt.Printf("Pod not found\n")
-		} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
-			fmt.Printf("Error getting pod %v\n", statusError.ErrStatus.Message)
-		} else if err != nil {
-			panic(err.Error())
-		} else {
-			fmt.Printf("Found pod\n")
+		// Create missing pods
+		for location := range missingLocations.Iter() {
+
+			desiredPod := createAetherPod(location.(string))
+			resultPod, err := clientset.CoreV1().Pods("default").Create(desiredPod)
+
+			if errors.IsAlreadyExists(err) {
+				fmt.Printf("Cannot create pod. It already exists: %s\n", desiredPod.Name)
+			} else if err != nil {
+				fmt.Printf("Error Creating Pod %s: %s\n", location, err.Error())
+				continue
+			}
+			fmt.Println("Created pod:", resultPod.Name)
 		}
 
+		fmt.Println("Aether Reconciliation Loop Sleeping...\n")
 		time.Sleep(10 * time.Second)
 	}
 }
 
-func GetWantedHashes() mapset.Set {
-	return mapset.NewSetWith("map1:(0,0)|(3,3)", "map1:(-4,-4)|(-1,-1)")
+func getWantedLocations() mapset.Set {
+	return mapset.NewSetWith("map1_0_0_3_3", "map1_-4_-4_-1_-1")
+}
+
+func createAetherDeployment() *appsv1beta1.Deployment {
+	deployment := &appsv1beta1.Deployment{}
+	panic("CreateAetherDeployment is not implemented")
+	return deployment
+}
+
+func createAetherPod(location string) *apiv1.Pod {
+	hasher := fnv.New64()
+	hasher.Write([]byte(location))
+	hashed := fmt.Sprintf("%x", hasher.Sum64())
+
+	pod := &apiv1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "aether-" + hashed,
+			Labels: map[string]string{
+				"app":      "aether",
+				"type":     "map-region",
+				"location": location,
+			},
+		},
+		Spec: apiv1.PodSpec{
+			Containers: []apiv1.Container{
+				{
+					Name:  "web",
+					Image: "nginx:1.12",
+					Ports: []apiv1.ContainerPort{
+						{
+							Name:          "http",
+							Protocol:      apiv1.ProtocolTCP,
+							ContainerPort: 80,
+						},
+					},
+					Resources: apiv1.ResourceRequirements{
+						Limits: apiv1.ResourceList{
+							// https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/#meaning-of-memory
+							"cpu":    *resource.NewMilliQuantity(200, resource.DecimalSI),
+							"memory": *resource.NewQuantity(128*1024, resource.BinarySI),
+						},
+					},
+				},
+			},
+		},
+	}
+	return pod
 }
