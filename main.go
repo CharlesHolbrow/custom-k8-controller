@@ -22,8 +22,6 @@ import (
 	"hash/fnv"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
 	"github.com/deckarep/golang-set"
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
 	apiv1 "k8s.io/api/core/v1"
@@ -63,6 +61,9 @@ func main() {
 
 		fmt.Println("Found locations...")
 		for i, pod := range pods.Items {
+			if pod.Status.Phase == apiv1.PodRunning {
+
+			}
 			name := pod.GetName()
 			location := pod.GetLabels()["location"]
 			currentLocations.Add(location)
@@ -100,8 +101,9 @@ func main() {
 			fmt.Println("Created pod:", resultPod.Name)
 		}
 
-		fmt.Println("Aether Reconciliation Loop Sleeping...\n")
+		fmt.Println("Aether Reconciliation Loop Sleeping...")
 		time.Sleep(10 * time.Second)
+		fmt.Println("...Aether Reconciliation Loop Wake\n")
 	}
 }
 
@@ -111,7 +113,9 @@ func getWantedLocations() mapset.Set {
 
 func createAetherDeployment() *appsv1beta1.Deployment {
 	deployment := &appsv1beta1.Deployment{}
-	panic("CreateAetherDeployment is not implemented")
+	if true {
+		panic("CreateAetherDeployment is not implemented")
+	}
 	return deployment
 }
 
@@ -142,14 +146,11 @@ func createAetherPod(location string) *apiv1.Pod {
 						},
 					},
 					Resources: apiv1.ResourceRequirements{
-						Limits: apiv1.ResourceList{
-							// https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/#meaning-of-memory
-							"cpu":    *resource.NewMilliQuantity(200, resource.DecimalSI),
-							"memory": *resource.NewQuantity(128*1024, resource.BinarySI),
-						},
+						Limits: apiv1.ResourceList{},
 					},
 				},
 			},
+			RestartPolicy: apiv1.RestartPolicyAlways,
 		},
 	}
 	return pod
